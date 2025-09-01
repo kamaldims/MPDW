@@ -1,0 +1,401 @@
+---
+title: "G1401231094_Kamal Aldimas_Tugas MPDW"
+output: html_document
+date: "2025-09-01"
+---
+
+```{r}
+library(readxl)
+library(rio)
+library("forecast")
+library("graphics")
+library("TTR")
+library(ggplot2)
+```
+# Import Data
+
+```{r}
+kurs<- read_excel("C:/Users/Kamal Aldimas/Downloads/SEMESTER 5/MPDW/Kurs Jual Rataan USD Fix.xlsx")
+kurs
+```
+```{r}
+data <- kurs[416:518,]
+data
+
+```
+```{r}
+data.ts <- ts(data$`Kurs Jual Rataan`)
+```
+# Eksplorasi Data
+```{r}
+summary(data.ts)
+```
+membuat plot data deret waktu
+```{r}
+ts.plot(data.ts, xlab="Time Period ", ylab="Kurs Jual Rataan", 
+        main = "Time Series Plot")
+points(data.ts)
+```
+# Single Moving Average
+
+pembagian data latih dan data uji dilakukan dengan perbandingan 80% data latih dan 20% data uji
+```{r}
+# hitung jumlah data
+n <- nrow(data)
+
+# tentukan batas 80%
+n_train <- floor(0.8 * n)
+
+# bagi data
+training_ma <- data[1:n_train, ]
+testing_ma  <- data[(n_train+1):n, ]
+
+# ubah ke time series
+train_ma.ts <- ts(training_ma$`Kurs Jual Rataan`)
+test_ma.ts  <- ts(testing_ma$`Kurs Jual Rataan`)
+```
+
+eksplorasi data latih
+```{r}
+plot(train_ma.ts, col="blue",main="Plot data latih")
+points(train_ma.ts)
+```
+eksplorasi data uji
+```{r}
+plot(test_ma.ts, col="blue",main="Plot data uji")
+points(test_ma.ts)
+```
+Plot Keseluruhan Data
+```{r}
+ggplot() + 
+  geom_line(data = training_ma, aes(x = `Minggu Ke-`, y = `Kurs Jual Rataan`, col = "Data Latih")) +
+  geom_line(data = testing_ma, aes(x = `Minggu Ke-`, y = `Kurs Jual Rataan`, col = "Data Uji")) +
+  labs(x = "minggu ke", y = "Kurs Jual Rataan", color = "Legend") +
+   scale_colour_manual(name="Keterangan:", breaks = c("Data Latih", "Data Uji"),
+                      values = c("blue", "red")) + 
+  theme_bw() + theme(legend.position = "bottom",
+                     plot.caption = element_text(hjust=0.5, size=12))
+```
+
+```{r}
+data.sma<-SMA(train_ma.ts, n=4)
+data.sma
+```
+```{r}
+data.ramal<-c(NA,data.sma)
+data.ramal #forecast 1 periode ke depan
+```
+```{r}
+data.gab<-cbind(
+  aktual=c(data.ts),
+  pemulusan=c(data.sma,rep(NA,24)),
+  ramalan=c(data.ramal,rep(data.ramal[length(data.ramal)],23)))
+```
+```{r}
+data.gab #forecast 24 periode ke depan
+```
+# Plot Hasil Peramalan
+```{r}
+ts.plot(data.ts, xlab="minggu ke", ylab="Kurs Jual Rataan", main= "SMA N=4 Data kurs")
+points(data.ts)
+lines(data.gab[,2],col="green",lwd=2)
+lines(data.gab[,3],col="red",lwd=2)
+legend("topleft",c("data aktual","data pemulusan","data peramalan"), lty=8, col=c("black","green","red"), cex=0.5)
+```
+```{r}
+#Menghitung nilai keakuratan data latih
+error_train.sma = train_ma.ts-data.ramal[1:length(train_ma.ts)]
+
+SSE_train.sma = sum(error_train.sma[5:length(train_ma.ts)]^2)
+MSE_train.sma = mean(error_train.sma[5:length(train_ma.ts)]^2)
+MAPE_train.sma = mean(abs((error_train.sma[5:length(train_ma.ts)]/train_ma.ts[5:length(train_ma.ts)])*100))
+
+akurasi_train.sma <- matrix(c(SSE_train.sma, MSE_train.sma, MAPE_train.sma))
+row.names(akurasi_train.sma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train.sma) <- c("Akurasi m = 4")
+akurasi_train.sma
+```
+
+MAPE data train pada metode pemulusan SMA sekitar 0,9% ini merupakan nilai akurasi yg cukup tinggi dan dikategorikan sangat baik
+```{r}
+# Ambil data aktual (baris 81-104, kolom 1)
+actual_test <- data.gab[81:104, 1]
+
+# Ambil data ramalan (baris 81-104, kolom 3)
+forecast_test <- data.gab[81:104, 3]
+
+# Hitung error
+error_test.sma <- actual_test - forecast_test
+
+# Hitung metrik
+SSE_test.sma <- sum(error_test.sma^2)
+MSE_test.sma <- mean(error_test.sma^2)
+MAPE_test.sma <- mean(abs(error_test.sma / actual_test * 100))
+
+# Simpan dalam matrix
+akurasi_test.sma <- matrix(c(SSE_test.sma, MSE_test.sma, MAPE_test.sma))
+row.names(akurasi_test.sma) <- c("SSE", "MSE", "MAPE")
+colnames(akurasi_test.sma) <- c("Akurasi m = 4")
+
+akurasi_test.sma
+```
+MAPE <10%, Nilai akurasi dikategorikan sangat baik
+
+# Single Exponential Smoothing
+
+Split data
+80% Data train & 20% data test
+```{r}
+# jumlah baris data
+n <- nrow(data)
+
+# hitung batas 80%
+n_train <- floor(0.8 * n)
+
+# bagi data
+training <- data[1:n_train, ]
+testing  <- data[(n_train+1):n, ]
+
+# ubah ke time series
+train.ts <- ts(training$`Kurs Jual Rataan`)
+test.ts  <- ts(testing$`Kurs Jual Rataan`)
+```
+
+Plot Data Train
+```{r}
+plot(train.ts, col="red",main="Plot data train")
+points(train.ts)
+```
+
+Plot Data Test
+```{r}
+plot(test.ts, col="blue",main="Plot data test")
+points(test.ts)
+```
+
+Plot Gabungan
+```{r}
+library(ggplot2)
+ggplot() + 
+  geom_line(data = training, aes(x = `Minggu Ke-`, y = `Kurs Jual Rataan`, col = "Data Latih")) +
+  geom_line(data = testing, aes(x = `Minggu Ke-`, y = `Kurs Jual Rataan`, col = "Data Uji")) +
+  labs(x = "Date", y = "Tota Sales", color = "Legend") +
+  scale_colour_manual(name="Keterangan:", breaks = c("Data Latih", "Data Uji"),
+                      values = c("blue", "red")) + 
+  theme_bw() + theme(legend.position = "bottom",
+                     plot.caption = element_text(hjust=0.5, size=12))
+```
+```{r}
+#Cara 1 (fungsi ses)
+ses.1 <- ses(train.ts, h = 10, alpha = 0.2)
+plot(ses.1)
+```
+```{r}
+autoplot(ses.1) +
+  autolayer(fitted(ses.1), series="Fitted") +
+  ylab("Kurs Jual Rataan") + xlab("Minggu Ke-")
+```
+```{r}
+#Cara 2 (fungsi Holtwinter)
+ses1<- HoltWinters(train.ts, gamma = FALSE, beta = FALSE, alpha = 0.2)
+plot(ses1)
+```
+```{r}
+#ramalan
+ramalan1<- forecast(ses1, h=10)
+ramalan1
+```
+```{r}
+ses2<- HoltWinters(train.ts, gamma = FALSE, beta = FALSE, alpha = 0.7)
+plot(ses2)
+```
+```{r}
+#ramalan
+ramalan2<- forecast(ses2, h=10)
+ramalan2
+```
+
+```{r}
+#SES
+ses.opt <- ses(train.ts, h = 10, alpha = NULL)
+plot(ses.opt)
+```
+```{r}
+ses.opt
+```
+
+```{r}
+#Lamda Optimum Holt Winter
+HWopt<- HoltWinters(train.ts, gamma = FALSE, beta = FALSE,alpha = NULL)
+HWopt
+```
+```{r}
+plot(HWopt)
+```
+
+```{r}
+#ramalan
+ramalanopt<- forecast(HWopt, h=10)
+ramalanopt
+```
+Akurasi Data Train
+```{r}
+#Keakuratan Metode
+#Pada data training
+
+# SES dengan alpha = 0.2
+SSE1<-ses1$SSE
+MSE1<-ses1$SSE/length(train.ts)
+RMSE1<-sqrt(MSE1)
+
+akurasi1 <- matrix(c(SSE1,MSE1,RMSE1))
+row.names(akurasi1)<- c("SSE", "MSE", "RMSE")
+colnames(akurasi1) <- c("Akurasi lamda=0.2")
+akurasi1
+```
+```{r}
+# SES dengan alpha = 0.7
+SSE2<-ses2$SSE
+MSE2<-ses2$SSE/length(train.ts)
+RMSE2<-sqrt(MSE2)
+
+akurasi2 <- matrix(c(SSE2,MSE2,RMSE2))
+row.names(akurasi2)<- c("SSE", "MSE", "RMSE")
+colnames(akurasi2) <- c("Akurasi lamda=0.7")
+akurasi2
+```
+Akurasi Data Test
+```{r}
+# jumlah observasi uji
+n_test <- nrow(testing)
+
+# error (ramalan - aktual), samakan panjang dan tipe numeric
+e1   <- as.numeric(ramalan1$mean)[1:n_test] - as.numeric(testing$`Kurs Jual Rataan`)
+e2   <- as.numeric(ramalan2$mean)[1:n_test] - as.numeric(testing$`Kurs Jual Rataan`)
+eopt <- as.numeric(ramalanopt$mean)[1:n_test] - as.numeric(testing$`Kurs Jual Rataan`)
+
+# SSE / MSE / RMSE untuk masing-masing model (abaikan NA)
+SSEtesting1  <- sum(e1^2,  na.rm = TRUE)
+MSEtesting1  <- mean(e1^2, na.rm = TRUE)
+RMSEtesting1 <- sqrt(MSEtesting1)
+
+SSEtesting2  <- sum(e2^2,  na.rm = TRUE)
+MSEtesting2  <- mean(e2^2, na.rm = TRUE)
+RMSEtesting2 <- sqrt(MSEtesting2)
+
+SSEtestingopt  <- sum(eopt^2,  na.rm = TRUE)
+MSEtestingopt  <- mean(eopt^2, na.rm = TRUE)
+RMSEtestingopt <- sqrt(MSEtestingopt)
+
+# Tabel ringkas
+akurasitesting_SSE <- matrix(c(SSEtesting1, SSEtesting2, SSEtestingopt),
+                             nrow = 3,
+                             dimnames = list(c("SSE1","SSE2","SSEopt"), "Nilai"))
+akurasitesting_MSE <- matrix(c(MSEtesting1, MSEtesting2, MSEtestingopt),
+                             nrow = 3,
+                             dimnames = list(c("MSE1","MSE2","MSEopt"), "Nilai"))
+akurasitesting_RMSE <- matrix(c(RMSEtesting1, RMSEtesting2, RMSEtestingopt),
+                              nrow = 3,
+                              dimnames = list(c("RMSE1","RMSE2","RMSEopt"), "Nilai"))
+
+akurasitesting_SSE
+```
+SSE1 > SSE2, artinya model 1 lebih baik daripada model 2
+
+SSEopt model yg optimal hampir sama dengan SSE2 maka model 2 sudah cukup bagus
+```{r}
+akurasitesting_MSE
+```
+Hasilnya sama-> MSE2 paling kecil maka model 2 lebih baik dri model dan MSEopt ihampir identik dengan MSE2
+
+
+```{r}
+akurasitesting_RMSE
+```
+artinya pada ketiga model ini rata2 error per prediksi sekitar 300an
+Model 1 Jauh lebih buruk krn rata2 error hampir mendekati 400
+
+# Kesimpulan
+
+Model 2 memberikan hasil yg terbaik dengan tingkat error terendah
+
+Model 1 jauh lebih buruk Karena SSE, MSE, RMSE lebih besar.
+
+Model optimal (SSEopt/MSEopt/RMSEopt) hampir sama dengan Model 2, artinya tuning parameter tidak banyak memperbaiki performa, maka Model 2 sudah cukup baik.
+
+Dari sudut pandang praktis, model terbaik menghasilkan error rata-rata sekitar bernilai 300an Kurs jual rataan setiap minggu.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
