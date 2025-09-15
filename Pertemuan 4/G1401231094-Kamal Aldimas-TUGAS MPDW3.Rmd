@@ -1,0 +1,382 @@
+---
+title: "G1401231094-Kamal Aldimas-Tugas MPDW"
+output: html_document
+date: "2025-09-14"
+---
+
+
+```{r}
+library(dlm)
+library(Metrics)
+library(dynlm)
+library(MLmetrics)
+library(dLagM)
+library(lmtest)
+library(car)
+library(forecast)
+```
+
+# Input Data
+```{r}
+# Baca CSV
+data <- read.csv("C:/Users/Kamal Aldimas/Downloads/NewDelhi_Air_quality.csv")
+
+data
+
+```
+```{r}
+str(data)
+```
+
+# Eksplorasi Data
+
+```{r}
+# Korelasi Pearson
+cor_matrix = cor(data[, c("AQI","CO","no2","o3","pm10","pm25","so2")], use="complete.obs")
+cor_matrix
+```
+
+```{r}
+library(ggplot2)
+
+vars = c("CO","no2","o3","pm10","pm25","so2")
+for (v in vars) {
+  p = ggplot(data, aes_string(x=v, y="AQI")) +
+    geom_point(alpha=0.5, color="steelblue") +
+    geom_smooth(method="lm", se=FALSE, color="red") +
+    labs(title=paste("Scatter plot AQI vs", v))
+  print(p)
+}
+```
+```{r}
+# Pola musiman AQI 
+aqi_ts <- ts(data$AQI, frequency = 12) # contoh bulanan
+ggseasonplot(aqi_ts, year.labels = TRUE, main = "Seasonal Plot AQI")
+
+```
+
+
+
+
+# Regresi 
+```{r}
+results = data.frame(Variable=character(), R2=numeric(), stringsAsFactors=FALSE)
+
+for (v in vars) {
+  formula = as.formula(paste("AQI ~", v))
+  model = lm(formula, data=data)
+  r2 = summary(model)$r.squared
+  results = rbind(results, data.frame(Variable=v, R2=r2))
+}
+
+print(results[order(-results$R2), ])
+```
+Disini terlihat bahwa korelasi yg paling tinggi adalah O3. Pernah ada penelitian di Indonesia bahwa Menganalisa AQI & kondisi meteorologi di Jakarta. Ditemukan bahwa suhu berpengaruh terhadap ozon (O₃), serta polutan lain seperti PM₁₀ mempengaruhi AQI(Teny Handhayani dkk., 2023)
+
+
+
+```{r}
+model1 = lm(AQI ~ o3, data = data)
+summary(model1)
+```
+# Pemodelan DLM & ARDL
+```{r}
+#sama dengan model dlm q=10
+conslm1 <- dynlm(AQI ~ o3 + L(o3, 1:10), data = tr.ts)
+#sama dengan model ardl p=13 q=2
+conslm2 <- dynlm(AQI ~ L(AQI, 1:13) + L(o3, 0:2), data = tr.ts)
+```
+
+## Ringkasan Model
+```{r}
+summary(conslm1)
+```
+```{r}
+summary(conslm2)
+```
+
+## SSE
+```{r}
+deviance(conslm1)
+```
+
+```{r}
+deviance(conslm2)
+```
+## Autokorelasi dan Heterogenitas
+```{r}
+dwtest(conslm1)
+```
+```{r}
+dwtest(conslm2)
+```
+
+```{r}
+bptest(conslm1)
+```
+```{r}
+bptest(conslm2)
+```
+## Cek Kenormalan
+```{r}
+shapiro.test(residuals(conslm1))
+```
+
+```{r}
+shapiro.test(residuals(conslm2))
+```
+
+
+# Pembagian Data
+
+```{r}
+# Buat dataframe log
+df_log = data.frame(
+  AQI_log = log(data$AQI),
+  O3_log  = log(data$o3)
+)
+
+# split data 
+n = nrow(df_log) 
+train_n = floor(0.7 * n) 
+train = df_log[1:train_n, ]
+test  = df_log[(train_n+1):n, ]
+
+train_ts <- ts(train, frequency = 12)
+test_ts  <- ts(test, frequency = 12)
+```
+
+```{r}
+train.ts <- ts(train)
+test.ts  <- ts(test)
+data.ts  <- ts(df_log)
+
+```
+
+# Pemodelan 
+
+## Model Koyck
+
+```{r}
+#MODEL KOYCK
+model.koyck <- koyckDlm(x = train$O3_log, y = train$AQI_log)
+summary(model.koyck)
+AIC(model.koyck)
+BIC(model.koyck)
+```
+Interpretasi Hasil:
+
+Dari summary, kita dapatkan model:
+
+Yt^=-0.05870 + 0.2559267Xt + 0.4456548Yt−1
+Koefisien Xt
+ (0.2559267) signifikan, artinya nilai o3 saat ini berpengaruh terhadap Y
+ 
+Koefisien Yt−1
+ (0.4456548) juga signifikan. Ini adalah estimasi untuk λ Nilai ini menunjukkan bahwa sekitar 44% dari efek di periode sebelumnya masih “terbawa” ke periode saat ini.
+
+### Peramalan & akurasi
+
+```{r}
+# Peramalan y untuk 5 periode kedepan dengan menggunakan model koyck
+library(dLagM)
+fore.koyck = dLagM::forecast(model = model.koyck, x = train$O3_log, h = 5) # Membandingkan dengan data testing 
+fore.koyck
+```
+
+```{r}
+# Cek nilai MAPE
+mape.koyck = MAPE(model.koyck)
+mape.koyck #data test
+
+```
+
+```{r}
+GoF(model.koyck)
+```
+## Distibuted Lag
+
+### Pemodelan (lag = 2)
+```{r}
+model.dlm = dlm(x = train$O3_log, y = train$AQI_log, q = 2)
+summary(model.dlm)
+```
+Dari hasil diatas, didapat bahwa P−value
+ dari intercept dan xt<0.05. Hal ini menunjukkan bahwa xt berpengaruh signifikan terhadap y
+Adapun model keseluruhan yang terbentuk adalah sebagai berikut
+
+Yt^=-0.767985 + 1.035537Xt- 0.028351Xt−1- -0.008469Xt−2
+
+### Peramalan dan Akurasi
+
+```{r}
+fore.dlm = dLagM::forecast(model = model.dlm, x = train$O3_log, h = 5) # Membandingkan dengan data testing 
+fore.dlm
+```
+
+```{r}
+mape.dlm = MAPE(model.dlm)
+mape.dlm
+```
+
+## Lag Optimum
+
+```{r}
+train_sub <- train[, c("AQI_log", "O3_log")]
+# Penentuan Lag Optimum
+finiteDLMauto(formula = AQI_log ~ O3_log,
+              data = train_sub, q.min = 1, q.max = 10,
+              model.type = "dlm", error.type = "AIC", trace = TRUE)
+```
+```{r}
+model.dlm2 = dlm(x = train$O3_log, y = train$AQI_log, q = 6)
+summary(model.dlm2)
+AIC(model.dlm2)
+BIC(model.dlm2)
+```
+Dari hasil tersebut terdapat beberapa peubah yang berpengaruh signifikan terhadap taraf nyata 5%. keseluruhan model yang terbentuk adalah
+Yt^=-0.78127 + 1.05979Xt+...+ 0.02548Xt−6 
+
+```{r}
+fore.dlm2 = dLagM::forecast(model = model.dlm2, x = test$O3_log, h = 5)
+fore.dlm2
+
+```
+
+```{r}
+GoF(model.dlm2)
+```
+
+```{r}
+mape.dlm2 = MAPE(model.dlm2)
+mape.dlm2
+```
+
+# Model Autoregressive
+
+## Pemodelan
+```{r}
+model.ardl = dLagM::ardlDlm(x = train$O3_log, y = train$AQI_log, p = 1, q = 1)
+summary(model.ardl)
+AIC(model.ardl)
+BIC(model.ardl)
+```
+
+## Peramalan dan Akurasi
+```{r}
+alpha <- -0.42361
+beta0 <-  1.03217 
+beta1 <- -0.49927   
+phi1  <-  0.47048   
+
+h <- 5
+y_fore <- numeric(h)
+
+last_y <- tail(train$AQI_log, 1)     # Y_(t)
+last_y1 <- tail(train$AQI_log, 2)[1] # Y_(t-1)
+last_x <- tail(train$O3_log, 1)      # X_(t)
+last_x1 <- tail(train$O3_log, 2)[1]  # X_(t-1)
+
+for (i in 1:h) {
+  x_now <- test$O3_log[i]         
+  x_lag <- if (i == 1) last_x else test$O3_log[i-1]  # X_(t-1)
+  
+  y_fore[i] <- alpha + beta0*x_now + beta1*x_lag + phi1*last_y
+  
+  last_y <- y_fore[i]
+}
+
+# Hasil forecast
+y_fore
+```
+```{r}
+fore.ardl <- list(forecasts = y_fore)
+fore.ardl$forecasts
+```
+```{r}
+# Cek MAPE
+# Ambil aktual 5 periode dari test set
+y_actual <- test$AQI_log[1:5]
+
+# Prediksi dari hasil manual forecast
+y_pred <- y_fore
+
+# Hitung MAPE
+mape.ardl <- mean(abs((y_actual - y_pred) / y_actual)) * 100
+mape.ardl
+```
+```{r}
+GoF(model.ardl)
+```
+Berdasarkan akurasi di atas, terlihat bahwa nilai MAPE keduanya tidak jauh berbeda. Artinya, model regresi dengan distribusi lag ini tidakoverfitted atau underfitted
+
+# Lag Optimum
+
+```{r}
+model.ardl.opt = ardlBoundOrders(data = train, ic = "AIC", 
+                                  formula = AQI_log ~ O3_log)
+
+model.ardl.opt
+```
+Dari tabel di atas, dapat terlihat bahwa nilai AIC terendah didapat ketika p=2 dan q=1, yaitu sebesar -285.0219. Artinya, model autoregressive optimum didapat ketika p=2 dan q=1
+
+
+```{r}
+model.ardl2 <- ardlDlm(formula = AQI_log ~ O3_log,
+                         data = train, p = 10, q = 1)
+summary(model.ardl2)
+AIC(model.ardl2)
+```
+
+# Perbandingan Model
+
+```{r}
+akurasi <- matrix(c(mape.koyck, 
+                    mape.dlm, 
+                    mape.dlm2,
+                    mape.ardl))
+row.names(akurasi)<- c("Koyck",
+                       "DLM 1",
+                       "DLM 2",
+                       "Autoregressive")
+colnames(akurasi) <- c("MAPE")
+akurasi
+```
+Berdasarkan nilai MAPE, model paling optimum didapat pada Model DLM 2 karena memiliki nilai MAPE yang terkecil.
+
+## Plot
+
+```{r}
+y_actual <- test$AQI_log[1:5]
+x_actual <- test$O3_log[1:5]
+
+y_koyck <- fore.koyck$forecasts
+y_dlm1  <- fore.dlm$forecasts
+y_dlm2  <- fore.dlm2$forecasts
+y_ardl  <- fore.ardl$forecasts
+
+plot(x_actual, y_actual, type="b", col="black", ylim=c(min(y_actual, y_koyck, y_dlm1, y_dlm2, y_ardl)-0.1, 
+                                                      max(y_actual, y_koyck, y_dlm1, y_dlm2, y_ardl)+0.1),
+     xlab="O3_log", ylab="AQI_log", main="Aktual vs Forecast (5 Periode Test)")
+
+lines(x_actual, y_koyck, col="red", type="b", pch=19)
+lines(x_actual, y_dlm1,  col="blue", type="b", pch=19)
+lines(x_actual, y_dlm2,  col="orange", type="b", pch=19)
+lines(x_actual, y_ardl,  col="green", type="b", pch=19)
+
+legend("topleft", c("Aktual", "Koyck", "DLM1", "DLM2", "ARDL"),
+       col=c("black","red","blue","orange","green"), lty=1, pch=19, cex=0.8)
+```
+Dari plot sendiri terlihat yang paling mendekati data aktual adalah DLM. Hal ini sesuai dengan hasil MAPE yang didapatkan sebelumnya.
+
+
+
+
+
+
+
+
+
+
+
+
