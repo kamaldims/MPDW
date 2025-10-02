@@ -1,0 +1,185 @@
+---
+title: "G1401231094-Kamal Aldimas-Tugas MPDW 5"
+output: html_document
+date: "2025-10-02"
+---
+
+```{r}
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+```
+
+# Input Data
+```{r}
+library(readxl)
+
+data <- read_excel("C:/Users/Kamal Aldimas/Downloads/SEMESTER 5/MPDW/Kurs Jual Rataan USD Fix.xlsx")
+
+print(head(data))
+
+data1 <- data[416:518, ]
+
+print(head(data1))
+```
+
+# Time Series
+## Ubah data menjadi time series
+```{r}
+data.ts <- ts(data1$`Kurs Jual Rataan`)
+```
+
+## Plot
+```{r}
+ts.plot(data.ts, xlab = "Minggu Ke-", ylab = "Kurs Jual Rataan", 
+        main = "Time Series Plot",
+        ylim = c(400, 20000))   # atur rentang Y
+
+points(data.ts)
+```
+# Cek Stasioneritas
+```{r}
+mean(data.ts)
+var(data.ts)
+```
+## ACF
+```{r}
+acf(data.ts, main = "ACF Kurs Jual Rataan")
+```
+Dari plot di atas menunjukkan bahwa data tidak stasioner karena nilai ACF menurun secara konstan.
+
+## Uji ADF
+```{r}
+adf.test(data.ts)
+```
+Karena p-value > 0.05, maka gagal menolak H0 yang artinya terdapat ketidakstasioneran pada data.
+
+## Box cox
+```{r}
+index = seq(416:518)
+b = boxcox(data.ts~index, lambda = seq(-1,4,by=1))
+```
+```{r}
+lambda = b$x[which.max(b$y)]
+lambda
+```
+```{r}
+b$x[b$y > max(b$y) - 1/2 * qchisq(.95,1)]
+```
+Plot di atas menunjukkan nilai rounded value (λ) optimum sebesar 1.979798 dan pada selang kepercayaan 95% nilai memiliki batas bawah -1 dan batas atas  4. Selang tersebut memuat nilai satu sehingga dapat dikatakan bahwa data stasioner dalam ragam.
+
+# Penanganan
+## Diferensiasi
+```{r}
+data.ts_diff <- diff(data.ts, differences = 1)
+
+plot(data.ts_diff, 
+     main = "First Differencing Kurs Jual Rataan", 
+     ylab = "Harga Kurs Jual Rataam", 
+     col = "red")
+
+```
+## Plot ACF Setelah Diferensiasi
+```{r}
+acf(data.ts_diff, main = "ACF setelah First Differencing")
+```
+## Plot PACF Setelah Diferensiasi
+```{r}
+pacf(data.ts_diff, main = "PACF setelah First Differencing")
+```
+
+## Uji ADF Setelah Diferensiasi
+```{r}
+adf.test(data.ts_diff)
+```
+H0 : Data tidak stasioner dalam rataan
+H1 : Data stasioner dalam rataan
+Karena p-value < 0.05, maka tolak H0 yang artinya data sudah stasioner dalam rataan.
+
+# Identifikasi Model
+```{r}
+acf(data.ts_diff, main = "ACF setelah differencing 1")
+```
+
+```{r}
+pacf(data.ts_diff, main = "PACF setelah differencing 1")
+library(TSA)
+```
+
+```{r}
+eacf(data.ts_diff)
+```
+
+```{r}
+
+library(forecast)
+
+# Fit beberapa model ARIMA
+fit1 <- Arima(data.ts, order = c(0,1,1), lambda = lambda)
+fit2 <- Arima(data.ts, order = c(1,1,1), lambda = lambda)
+fit3 <- Arima(data.ts, order = c(2,1,1), lambda = lambda)
+
+# Buat fungsi untuk ambil metrik model
+get_metrics <- function(fit) {
+  err <- accuracy(fit)
+  data.frame(
+    Model = deparse(fit$call),
+    AIC = AIC(fit),
+    BIC = BIC(fit),
+    RMSE = err["Training set","RMSE"],
+    MAE = err["Training set","MAE"],
+    MAPE = err["Training set","MAPE"]
+  )
+}
+
+# Kumpulkan semua model
+results <- rbind(
+  get_metrics(fit1),
+  get_metrics(fit2),
+   get_metrics(fit3)
+)
+
+print(results)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
